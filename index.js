@@ -14,18 +14,24 @@ program
 .parse(process.argv);
 
 const options = program.opts();
-
 if(options.clearCache) {
-    cache.clear();
-    console.log('Cache cleared');
-    process.exit(0);
-    } 
+    const port = options.port || 3000; // default port if not provided
+    const req = http.request({
+        hostname: 'localhost',
+        port: port,
+        path: '/clear-cache',
+        method: 'POST'
+    }, (res) => {
+        res.on('data', (chunk) => process.stdout.write(chunk));
+        res.on('end', () => process.exit(0));  
+    });
+    req.on('error', (err) => {
+        console.error('Error clearing cache:', err);
+        process.exit(1);
+    });
+    req.end();
+} 
 
-if(!options.port || !options.origin) {
-    console.error('Port and Origin URL are required unless --clear-cache is specified');
-    process.help();
-    process.exit(1);
-}
 
 const originURL = options.origin;
 
@@ -34,7 +40,20 @@ const originURL = options.origin;
 const server = http.createServer((req, res) => {
     const requestURL = req.url;
     const cacheKey = `${req.method}:${requestURL}`;
-    
+    if (req.method === 'POST' && requestURL === '/clear-cache') {
+        if(cache.size > 0) {
+            console.log('Clearing cache as per request');
+            cache.clear();
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('Cache cleared');
+            return;
+        }   else {
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('Cache is already empty');
+            return;
+        }
+    }
+
     if(cache.has(cacheKey)) {
         const cachedResponse = cache.get(cacheKey);
         res.writeHead(cachedResponse.statusCode, {
@@ -44,8 +63,7 @@ const server = http.createServer((req, res) => {
         res.end(cachedResponse.body);
         return;
     }
-console.log(`cacheKey ${cacheKey}`);
-console.log(`Forwarding request to ${originURL}${requestURL}`);
+
   const targetURL = new URL(requestURL, originURL);
   console.log(`Target URL: ${targetURL}`);
   const proxyReqOptions = {
@@ -89,7 +107,9 @@ console.log(`Forwarding request to ${originURL}${requestURL}`);
 });
 
 server.listen(options.port, () => {
+    if(originURL && options.port) {
     console.log(`Caching proxy server running on port ${options.port}, forwarding to ${originURL}`);
+    }
 });
 
 
